@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>3DMIC Serial Command</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- 添加jsQR库用于二维码解析 -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>3DMIC串口控制台</h1>
+        
+        <div class="connection-panel">
+            <button id="connect-button">连接设备</button>
+            <div class="connection-settings">
+                <label for="baudrate">波特率：</label>
+                <select id="baudrate">
+                    <option value="9600">9600</option>
+                    <option value="19200">19200</option>
+                    <option value="38400">38400</option>
+                    <option value="57600">57600</option>
+                    <option value="115200">115200</option>
+                </select>
+                <label for="dtr-enabled">
+                    <input type="checkbox" id="dtr-enabled" checked> 启用DTR
+                </label>
+            </div>
+        </div>
+
+        <!-- 添加二维码处理面板 -->
+        <div class="qrcode-panel">
+            <h2>二维码处理</h2>
+            <div class="qrcode-input">
+                <input type="file" id="qrcode-file" accept="image/*">
+                <label for="qrcode-file" class="file-label">选择二维码图片</label>
+                <div class="drag-area" id="drag-area">
+                    <p>或将图片拖放到此处</p>
+                    <div id="preview-container"></div>
+                </div>
+            </div>
+            <div class="qrcode-content">
+                <h3>解析结果</h3>
+                <div id="qrcode-result" class="qrcode-result"></div>
+                <button id="send-qrcode" disabled>发送指令到串口</button>
+            </div>
+        </div>
+
+        <div class="command-panel">
+            <div class="command-input">
+                <input type="text" id="command" placeholder="输入指令...">
+                <button id="send-button" disabled>发送</button>
+            </div>
+        </div>
+
+        <div class="response-area">
+            <h3>串口响应</h3>
+            <div class="response-display" id="response-display"></div>
+        </div>
+
+        <div class="log-panel">
+            <h3>操作日志</h3>
+            <div id="log-content"></div>
+            <button id="clear-log">清除日志</button>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

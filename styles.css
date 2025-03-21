@@ -1,0 +1,189 @@
+.container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+}
+
+h1, h2, h3 {
+    color: #333;
+}
+
+.connection-panel,
+.command-panel,
+.qrcode-panel,
+.response-area,
+.log-panel {
+    margin: 20px 0;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+}
+
+.connection-settings {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.command-input {
+    display: flex;
+    gap: 10px;
+}
+
+#command {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+button {
+    padding: 8px 15px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+.log-panel {
+    height: 200px;
+    overflow-y: auto;
+}
+
+#log-content {
+    font-family: monospace;
+}
+
+.log-entry {
+    margin: 5px 0;
+    padding: 5px;
+    border-bottom: 1px solid #eee;
+}
+
+.log-entry.error { color: #d32f2f; }
+.log-entry.success { color: #388e3c; }
+.log-entry.sent { color: #1976d2; }
+.log-entry.received { color: #7b1fa2; }
+
+.response-display {
+    height: 150px;
+    overflow-y: auto;
+    font-family: monospace;
+    padding: 10px;
+    background-color: #f0f0f0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.response-item {
+    margin: 5px 0;
+    padding: 5px;
+    border-bottom: 1px solid #eee;
+}
+
+.response-item.error {
+    color: #d32f2f;
+}
+
+.response-timestamp {
+    color: #666;
+    font-size: 0.8em;
+}
+
+.response-content {
+    margin-top: 3px;
+}
+
+.response-hex {
+    font-size: 0.8em;
+    color: #666;
+    margin-top: 3px;
+}
+
+/* 二维码处理相关样式 */
+.qrcode-input {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+#qrcode-file {
+    display: none;
+}
+
+.file-label {
+    display: inline-block;
+    padding: 10px 15px;
+    background-color: #2196F3;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: center;
+}
+
+.file-label:hover {
+    background-color: #0b7dda;
+}
+
+.drag-area {
+    border: 2px dashed #ccc;
+    border-radius: 4px;
+    padding: 20px;
+    text-align: center;
+    margin-top: 10px;
+    transition: border-color 0.3s;
+}
+
+.drag-area.active {
+    border-color: #2196F3;
+    background-color: rgba(33, 150, 243, 0.1);
+}
+
+.drag-area p {
+    margin: 0;
+    color: #666;
+}
+
+#preview-container {
+    margin-top: 15px;
+    max-width: 100%;
+}
+
+#preview-container img {
+    max-width: 300px;
+    max-height: 300px;
+    border: 1px solid #ddd;
+}
+
+.qrcode-result {
+    background-color: #f0f0f0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    min-height: 100px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: monospace;
+    white-space: pre-wrap;
+    margin-bottom: 15px;
+}
+
+#send-qrcode {
+    width: 100%;
+    margin-top: 10px;
+}
