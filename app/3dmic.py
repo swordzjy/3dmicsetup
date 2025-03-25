@@ -1,134 +1,3 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
-import serial
-import serial.tools.list_ports
-import cv2
-from pyzbar.pyzbar import decode
-from PIL import Image, ImageTk
-import threading
-import time
-import os
-import queue
-import numpy as np
-from screenshot_selector import start_screenshot  # 导入我们的截图模块
-import pyaudio
-import matplotlib
-from matplotlib.font_manager import FontProperties
-matplotlib.use("TkAgg")  # 设置matplotlib后端为TkAgg
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import matplotlib.font_manager as fm
-import traceback
-from datetime import datetime
-
-# 程序依赖以下包:
-# pip install pyserial opencv-python pyzbar pillow numpy pyaudio matplotlib
-
-# Language dictionary
-LANGUAGES = {
-    "en": {
-        "title": "Tradio 3D Microphone",
-        "matplot_title": "Real-time Sound Wave",
-        "left_channel": "Left Channel",
-        "right_channel": "Right Channel",
-        "status_not_connected": "Not Connected",
-        "status_connected": "Connected to {}",
-        "waveform": "",
-        "qr_scan": "QR Code Scan",
-        "open_camera": "Open Camera",
-        "close_camera": "Close Camera",
-        "select_image": "Select Image",
-        "screenshot": "Screenshot",
-        "qr_content": "QR Code Content",
-        "send_command": "Setup Microphone",
-        "device_response": "Device Response",
-        "clear": "Clear",
-        "send": "Send",
-        "auto_connect_try": "Trying to automatically connect to microphone: {}",
-        "auto_connect_fail": "Auto connection failed: {}",
-        "mic_not_found": "3D Microphone not found",
-        "log_connected": "Successfully connected to device {} (baud rate: 115200)",
-        "connection_error": "Connection error: {}",
-        "read_error": "Read error: {}",
-        "send_fail": "Send failed: {}",
-        "parsed_qr": "QR code parsed, contains {} commands",
-        "no_commands": "No commands to send",
-        "device_not_connected": "Error: Device not connected",
-        "sending_commands": "Sending Commands...",
-        "sending_complete": "Sending Complete",
-        "of_total": "{}/{}",
-        "screenshot_start": "Starting screenshot function...",
-        "screenshot_fail": "Failed to start screenshot: {}",
-        "qr_not_detected": "No QR code detected in screenshot",
-        "qr_detected": "Successfully detected QR code from screenshot",
-        "screenshot_instruction": "Click and drag to select area, release to capture, ESC to cancel",
-         "screenshot_error": "Error during screenshot process: {}",
-        "waveform_started": "Waveform display started",
-        "waveform_error": "Waveform startup error: {}",
-        "waveform_update_error": "Waveform update error: {}",
-        "found_3d_mic": "Found 3D microphone audio device: {}",
-        "mic_not_found_default": "Specific 3D microphone audio device not found, will use default",
-        "using_default_audio": "Using default audio device: {}",
-        "audio_device_error": "Error finding audio device: {}",
-        "waveform_stopped": "Waveform display stopped",
-        "close_audio_error": "Error closing audio stream: {}",
-        "language": "Language",
-        "error_title":"Error",
-        "qr_preview": "QR Preview",
-        "operations_menu": "Operations",
-        "language_name": "English"
-    },
-    "zh": {
-        "title": "Tradio 3D麦克风",
-        "matplot_title": "实时声音波形",
-        "left_channel": "左声道",
-        "right_channel": "右声道",
-        "status_not_connected": "未连接",
-        "status_connected": "已连接 {}",
-        "waveform": "",
-        "qr_scan": "二维码扫描",
-        "open_camera": "打开摄像头",
-        "close_camera": "关闭摄像头",
-        "select_image": "选择图片",
-        "screenshot": "屏幕截图",
-        "qr_content": "二维码内容",
-        "send_command": "配置麦克风",
-        "device_response": "设备响应",
-        "clear": "清除",
-        "send": "发送",
-        "auto_connect_try": "尝试自动连接麦克风设备: {}",
-        "auto_connect_fail": "自动连接失败: {}",
-        "mic_not_found": "未找到3D麦克风设备",
-        "log_connected": "成功连接到设备 {} (波特率: 115200)",
-        "connection_error": "连接错误: {}",
-        "read_error": "读取错误: {}",
-        "send_fail": "发送失败: {}",
-        "parsed_qr": "已解析二维码，包含 {} 条指令",
-        "no_commands": "没有可发送的指令",
-        "device_not_connected": "错误: 设备未连接",
-        "sending_commands": "正在发送指令...",
-        "sending_complete": "发送完成",
-        "of_total": "{}/{}",
-        "screenshot_start": "正在启动屏幕截图功能...",
-        "screenshot_fail": "启动截图功能失败: {}",
-        "qr_not_detected": "未在截图中检测到二维码",
-        "qr_detected": "成功从截图中检测到二维码",
-        "screenshot_instruction": "点击并拖动选择区域, 松开完成截图, ESC取消",
-        "screenshot_error": "处理截图时出错: {}",
-        "waveform_started": "波形图显示已启动",
-        "waveform_error": "启动波形图错误: {}",
-        "waveform_update_error": "波形图更新错误: {}",
-        "found_3d_mic": "找到3D麦克风音频设备: {}",
-        "mic_not_found_default": "未找到特定的3D麦克风音频设备，将使用默认设备",
-        "using_default_audio": "使用默认音频设备: {}",
-        "audio_device_error": "查找音频设备错误: {}",
-        "waveform_stopped": "波形图显示已关闭",
-        "close_audio_error": "关闭音频流错误: {}",
-        "language": "语言",
-        "error_title":"错误",
-        "qr_preview": "二维码预览",
-        "operations_menu": "操作",
-        "language_name": "中文"
     }
 }
 
@@ -227,17 +96,183 @@ class SerialQRCodeApp:
         operation_menu = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=self.texts["operations_menu"], menu=operation_menu)
         
-        # 添加菜单项
-        operation_menu.add_command(label=self.texts["select_image"], command=self.select_image)
-        operation_menu.add_command(label=self.texts["screenshot"], command=self.capture_screenshot)
-        operation_menu.add_command(label=self.texts["open_camera"], command=self.toggle_camera)
+        # 添加菜单项（带快捷键）
+        operation_menu.add_command(
+            label=self.texts["select_image"], 
+            command=self.select_image,
+            accelerator="Ctrl+O"  # 显示快捷键
+        )
+        operation_menu.add_command(
+            label=self.texts["screenshot"], 
+            command=self.capture_screenshot,
+            accelerator="Ctrl+S"
+        )
+        operation_menu.add_command(
+            label=self.texts["open_camera"], 
+            command=self.toggle_camera,
+            accelerator="Ctrl+C"
+        )
         
         # 创建语言菜单
+import tkinter as tk
         language_menu = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=self.texts["language"], menu=language_menu)
         
+        # 添加帮助菜单
+        help_menu = tk.Menu(self.menubar, tearoff=0)
+from tkinter import ttk, filedialog, messagebox, scrolledtext
+import serial
+import serial.tools.list_ports
+import cv2
+from pyzbar.pyzbar import decode
+from PIL import Image, ImageTk
+import threading
+import time
+import os
+import queue
+import numpy as np
+from screenshot_selector import start_screenshot  # 导入我们的截图模块
+import pyaudio
+import matplotlib
+from matplotlib.font_manager import FontProperties
+matplotlib.use("TkAgg")  # 设置matplotlib后端为TkAgg
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.font_manager as fm
+import traceback
+from datetime import datetime
+
+# 程序依赖以下包:
+# pip install pyserial opencv-python pyzbar pillow numpy pyaudio matplotlib
+
+# Language dictionary
+LANGUAGES = {
+    "en": {
+        "title": "Tradio 3D Microphone",
+        "matplot_title": "Real-time Sound Wave",
+        "left_channel": "Left Channel",
+        "right_channel": "Right Channel",
+        "status_not_connected": "Not Connected",
+        "status_connected": "Connected to {}",
+        "waveform": "",
+        "qr_scan": "QR Code Scan",
+        "open_camera": "Open Camera",
+        "close_camera": "Close Camera",
+        "select_image": "Select Image",
+        "screenshot": "Screenshot",
+        "qr_content": "QR Code Content",
+        "send_command": "Setup Microphone",
+        "device_response": "Device Response",
+        "clear": "Clear",
+        "send": "Send",
+        "auto_connect_try": "Trying to automatically connect to microphone: {}",
+        "auto_connect_fail": "Auto connection failed: {}",
+        "mic_not_found": "3D Microphone not found",
+        "log_connected": "Successfully connected to device {} (baud rate: 115200)",
+        "connection_error": "Connection error: {}",
+        "read_error": "Read error: {}",
+        "send_fail": "Send failed: {}",
+        "parsed_qr": "QR code parsed, contains {} commands",
+        "no_commands": "No commands to send",
+        "device_not_connected": "Error: Device not connected",
+        "sending_commands": "Sending Commands...",
+        "sending_complete": "Sending Complete",
+        "of_total": "{}/{}",
+        "screenshot_start": "Starting screenshot function...",
+        "screenshot_fail": "Failed to start screenshot: {}",
+        "qr_not_detected": "No QR code detected in screenshot",
+        "qr_detected": "Successfully detected QR code from screenshot",
+        "screenshot_instruction": "Click and drag to select area, release to capture, ESC to cancel",
+         "screenshot_error": "Error during screenshot process: {}",
+        "waveform_started": "Waveform display started",
+        "waveform_error": "Waveform startup error: {}",
+        "waveform_update_error": "Waveform update error: {}",
+        "found_3d_mic": "Found 3D microphone audio device: {}",
+        "mic_not_found_default": "Specific 3D microphone audio device not found, will use default",
+        "using_default_audio": "Using default audio device: {}",
+        "audio_device_error": "Error finding audio device: {}",
+        "waveform_stopped": "Waveform display stopped",
+        "close_audio_error": "Error closing audio stream: {}",
+        "language": "Language",
+        "error_title":"Error",
+        "qr_preview": "QR Preview",
+        "operations_menu": "Operations",
+        "language_name": "English",
+        self.menubar.add_cascade(label=self.texts["help"], menu=help_menu)
+        help_menu.add_command(
+            label=self.texts["about"],
+            command=self.show_about,
+            accelerator="F1"
+        )
+        
+        # 绑定快捷键
+        self.root.bind("<Control-o>", lambda e: self.select_image())
+        self.root.bind("<Control-O>", lambda e: self.select_image())
+        self.root.bind("<Control-s>", lambda e: self.capture_screenshot())
+        self.root.bind("<Control-S>", lambda e: self.capture_screenshot())
+        "help": "Help",
+        "about": "About",
+        "version_info": "3D Microphone Setup V2.0.0",
+        "about_message": "3D Microphone Setup\nVersion 2.0.0\n\nTradio Technology Co., Ltd."
+    },
+        self.root.bind("<Control-c>", lambda e: self.toggle_camera())
+        self.root.bind("<Control-C>", lambda e: self.toggle_camera())
+        self.root.bind("<F1>", lambda e: self.show_about())
+        
         # 为每种语言添加单选按钮
         self.lang_var = tk.StringVar(value=self.current_language)
+    "zh": {
+        "title": "Tradio 3D麦克风",
+        "matplot_title": "实时声音波形",
+        "left_channel": "左声道",
+        "right_channel": "右声道",
+        "status_not_connected": "未连接",
+        "status_connected": "已连接 {}",
+        "waveform": "",
+        "qr_scan": "二维码扫描",
+        "open_camera": "打开摄像头",
+        "close_camera": "关闭摄像头",
+        "select_image": "选择图片",
+        "screenshot": "屏幕截图",
+        "qr_content": "二维码内容",
+        "send_command": "配置麦克风",
+        "device_response": "设备响应",
+        "clear": "清除",
+        "send": "发送",
+        "auto_connect_try": "尝试自动连接麦克风设备: {}",
+        "auto_connect_fail": "自动连接失败: {}",
+        "mic_not_found": "未找到3D麦克风设备",
+        "log_connected": "成功连接到设备 {} (波特率: 115200)",
+        "connection_error": "连接错误: {}",
+        "read_error": "读取错误: {}",
+        "send_fail": "发送失败: {}",
+        "parsed_qr": "已解析二维码，包含 {} 条指令",
+        "no_commands": "没有可发送的指令",
+        "device_not_connected": "错误: 设备未连接",
+        "sending_commands": "正在发送指令...",
+        "sending_complete": "发送完成",
+        "of_total": "{}/{}",
+        "screenshot_start": "正在启动屏幕截图功能...",
+        "screenshot_fail": "启动截图功能失败: {}",
+        "qr_not_detected": "未在截图中检测到二维码",
+        "qr_detected": "成功从截图中检测到二维码",
+        "screenshot_instruction": "点击并拖动选择区域, 松开完成截图, ESC取消",
+        "screenshot_error": "处理截图时出错: {}",
+        "waveform_started": "波形图显示已启动",
+        "waveform_error": "启动波形图错误: {}",
+        "waveform_update_error": "波形图更新错误: {}",
+        "found_3d_mic": "找到3D麦克风音频设备: {}",
+        "mic_not_found_default": "未找到特定的3D麦克风音频设备，将使用默认设备",
+        "using_default_audio": "使用默认音频设备: {}",
+        "audio_device_error": "查找音频设备错误: {}",
+        "waveform_stopped": "波形图显示已关闭",
+        "close_audio_error": "关闭音频流错误: {}",
+        "language": "语言",
+        "error_title":"错误",
+        "qr_preview": "二维码预览",
+        "operations_menu": "操作",
+        "language_name": "中文",
+        "help": "帮助",
         for lang_code, lang_data in LANGUAGES.items():
             language_menu.add_radiobutton(
                 label=lang_data["language_name"],
@@ -302,6 +337,9 @@ class SerialQRCodeApp:
           # 创建响应文本框和滚动条
         self.response_text = scrolledtext.ScrolledText(
         self.response_frame, 
+        "about": "关于",
+        "version_info": "3D麦克风设置程序 V2.0.0",
+        "about_message": "3D麦克风设置程序\n版本 2.0.0\n\n传递科技有限公司"
         height=10,  # 增加高度以显示更多内容
         wrap=tk.WORD
          )
@@ -419,10 +457,134 @@ class SerialQRCodeApp:
             self.menubar.add_cascade(label=self.texts["operations_menu"], menu=operation_menu)
             
             # 添加操作菜单项
-            operation_menu.add_command(label=self.texts["select_image"], command=self.select_image)
-            operation_menu.add_command(label=self.texts["screenshot"], command=self.capture_screenshot)
+            operation_menu.add_command(
+    }
+}
+
+# Configure matplotlib to use a CJK-compatible font
+matplotlib.rcParams['font.family'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'sans-serif']
+
+# Fall back to a specific font file if necessary
+try:
+    # Check if a suitable font is available
+    font_path = fm.findfont(fm.FontProperties(family=['SimHei', 'Microsoft YaHei']))
+    if 'DejaVu' in font_path:  # No CJK font found
+        # Try to find any font that supports Chinese
+        fallback_font = None
+        for font in fm.findSystemFonts():
+            if any(name in font.lower() for name in ['simhei', 'yahei', 'simsun', 'noto', 'cjk']):
+                fallback_font = font
+                break
+        if fallback_font:
+            matplotlib.rcParams['font.family'] = 'sans-serif'
+            matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun']
+            matplotlib.rcParams['axes.unicode_minus'] = False
+except:
+    print("Warning: Could not configure CJK font for matplotlib")
+
+class SerialQRCodeApp:
+    def __init__(self, root):
+        self.root = root
+         #创建了一个线程锁，可以在需要串口访问的地方使用
+        self.serial_lock = threading.Lock()
+        # Set default language
+        self.current_language = "en"
+        self.texts = LANGUAGES[self.current_language]
+        
+        self.root.title(self.texts["title"])
+        
+        # 避免多次调整窗口大小
+        window_width = 1600
+        window_height = 1200
+       
+        self.root.minsize(1024, 768)
+        # 获取屏幕尺寸
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        
+        # 计算居中位置
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        # 一次性设置窗口大小和位置
+        root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # 强制更新
+        root.update_idletasks()
+        
+        # 设备变量
+        self.serial_port = None
+        self.is_connected = False
+        self.default_port = None  # 默认麦克风设备
+        self.command_queue = queue.Queue()
+        self.response_buffer = "Recieveing..."
+        
+        # 创建界面
+        self.create_ui()
+         
+        # 直接在控制台输出，确保能看到
+        print("界面创建完成，即将嵌入波形图...")
+        
+        # 音频处理相关参数
+        self.audio_setup()
+        
+        print("Audio setup completed, arranged to embed waveform")
+        
+        # 自动启动波形图 - 确保在嵌入后才启动
+        self.root.after(2000, self.start_waveform)
+        
+        # 启动线程
+        self.running = True
+        self.read_thread = threading.Thread(target=self.read_from_serial, daemon=True)
+        self.read_thread.start()
+        self.command_thread = threading.Thread(target=self.process_command_queue, daemon=True)
+        self.command_thread.start()
+        
+        # 自动连接麦克风设备
+        self.root.after(1000, self.auto_connect_mic)
+           
+    def create_ui(self):
+        # 主框架
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建菜单栏
+        self.menubar = tk.Menu(self.root)
+        self.root.config(menu=self.menubar)
+        
+        # 创建操作菜单
+        operation_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label=self.texts["operations_menu"], menu=operation_menu)
+        
+        # 添加菜单项
+        operation_menu.add_command(
+                label=self.texts["select_image"], 
+                command=self.select_image,
+                accelerator="Ctrl+O"  # 显示快捷键
+            )
+            operation_menu.add_command(
+            label=self.texts["select_image"],
+            command=self.select_image,
+            accelerator="Ctrl+O"
+        )
+        operation_menu.add_command(
+            label=self.texts["screenshot"],
+            command=self.capture_screenshot,
+            accelerator="Ctrl+S"
+        )
+        operation_menu.add_command(
+            label=self.texts["open_camera"],
+            command=self.toggle_camera,
+                label=self.texts["screenshot"], 
+                command=self.capture_screenshot,
+                accelerator="Ctrl+S"
+            )
             operation_menu.add_command(
                 label=self.texts["close_camera"] if self.camera_active else self.texts["open_camera"],
+            accelerator="Ctrl+C"
+        )
+        
+        # 创建语言菜单
                 command=self.toggle_camera
             )
             
@@ -439,11 +601,95 @@ class SerialQRCodeApp:
                     command=self.change_language
                 )
             
+            # 重新创建帮助菜单
+            help_menu = tk.Menu(self.menubar, tearoff=0)
+            self.menubar.add_cascade(label=self.texts["help"], menu=help_menu)
+        language_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label=self.texts["language"], menu=language_menu)
+        
+        # 为每种语言添加单选按钮
+        self.lang_var = tk.StringVar(value=self.current_language)
+        for lang_code, lang_data in LANGUAGES.items():
+            language_menu.add_radiobutton(
+                label=lang_data["language_name"],
+                variable=self.lang_var,
+                value=lang_code,
+                command=self.change_language
+            )
+            help_menu.add_command(
+                label=self.texts["about"],
+                command=self.show_about,
+                accelerator="F1"
+            )
+            
         except Exception as e:
             print(f"菜单更新错误: {str(e)}")
         
         # 更新其他UI元素...
         # 状态标签
+        
+        # 配置主框架中的行列权重 - 调整权重使关键区域获得足够空间
+        main_frame.columnconfigure(0, weight=1)  # 列可以扩展
+        main_frame.rowconfigure(0, weight=0)  # 第一行 - 顶部操作栏（固定高度）
+        main_frame.rowconfigure(1, weight=5)  # 第二行 - 波形图（较大权重）
+        main_frame.rowconfigure(2, weight=5)  # 第三行 - 设备响应（较大权重，原本是二维码区域的位置）
+        main_frame.rowconfigure(3, weight=0)  # 第四行 - 命令输入（固定高度）
+        
+        # 顶部操作栏 - 只保留状态标签和恢复按钮区域
+        top_frame = ttk.Frame(main_frame, padding="5")
+        top_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        
+        # 配置top_frame内部布局
+        top_frame.columnconfigure(0, weight=1)  # 状态标签 - 可以扩展
+        top_frame.columnconfigure(1, weight=0)  # 恢复按钮 - 固定宽度
+        
+        # 状态标签
+        self.status_label = ttk.Label(top_frame, text=self.texts["status_not_connected"])
+        self.status_label.grid(row=0, column=0, sticky="w", padx=(0, 15))
+        
+        # 恢复按钮框架 (初始隐藏)
+        self.restore_frame = ttk.Frame(top_frame)
+        self.restore_frame.grid(row=0, column=1, sticky="e")
+        self.restore_frame.grid_remove()  # 初始隐藏
+        
+        self.restore_button = ttk.Button(
+            self.restore_frame, 
+            text="恢复原始配置", 
+            command=self.restore_original_config
+        )
+        self.restore_button.pack(side=tk.RIGHT, padx=5)
+        
+        # 波形图容器框架
+        self.waveform_frame = ttk.LabelFrame(main_frame, text="", padding="1")
+        self.waveform_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        # 设置最小高度
+        self.waveform_frame.config(height=400, width=400)
+        self.waveform_frame.pack_propagate(False)  # 确保高度固定，不会被子组件影响
+        self.waveform_frame.grid_propagate(False)
+        
+        # 响应显示区域 - 直接放在第二行 (原第三行)
+        self.response_frame = ttk.LabelFrame(main_frame, text=self.texts["device_response"], padding="10")
+        self.response_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
+        
+        # 配置response_frame内部布局
+        self.response_frame.columnconfigure(0, weight=1)
+        self.response_frame.rowconfigure(0, weight=1)
+        self.response_frame.rowconfigure(1, weight=0)
+        self.response_frame.grid_propagate(False)
+        
+        # 修改文本框高度为更大的值
+        self.response_text = tk.Text(self.response_frame, height=15, wrap=tk.WORD)
+        self.response_text.grid(row=0, column=0, sticky="nsew")
+        self.response_text.config(state=tk.DISABLED)
+          # 创建响应文本框和滚动条
+        self.response_text = scrolledtext.ScrolledText(
+        self.response_frame, 
+        height=10,  # 增加高度以显示更多内容
+        wrap=tk.WORD
+         )
+        self.response_text.pack(fill='both', expand=True)
+        # # 滚动条
+        # response_scrollbar = ttk.Scrollbar(self.response_text, orient=tk.VERTICAL, command=self.response_text.yview)
         if self.is_connected and self.serial_port:
             self.status_label.config(text=self.texts["status_connected"].format(self.serial_port.port))
         else:
@@ -510,6 +756,113 @@ class SerialQRCodeApp:
         self.p = pyaudio.PyAudio()
         self.stream = None
         self.waveform_active = False
+        # response_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # self.response_text.config(yscrollcommand=response_scrollbar.set)
+        
+        self.clear_button = ttk.Button(self.response_frame, text=self.texts["clear"], command=self.clear_response)
+        self.clear_button.grid(row=1, column=0, pady=5)
+        
+        # 手动命令输入 - 移到第三行 (原第四行)
+        cmd_frame = ttk.Frame(main_frame, padding="5")
+        cmd_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
+        
+        # 配置cmd_frame内部布局
+        cmd_frame.columnconfigure(0, weight=1)
+        cmd_frame.columnconfigure(1, weight=0)
+        
+        self.cmd_entry = ttk.Entry(cmd_frame)
+        self.cmd_entry.grid(row=0, column=0, sticky="ew")
+        
+        self.cmd_button = ttk.Button(cmd_frame, text=self.texts["send"], command=self.send_manual_command, state=tk.DISABLED)
+        self.cmd_button.grid(row=0, column=1, padx=5)
+        
+        self.cmd_entry.bind("<Return>", lambda e: self.send_manual_command())
+        
+        # 摄像头变量
+        self.cap = None
+        self.camera_active = False
+        
+        # 解析到的二维码命令
+        self.qr_commands = []
+        
+        # 创建二维码相关组件，但不显示它们
+        self.create_hidden_qr_components(main_frame)
+        
+        # 最后一次性强制所有组件更新
+        for child in self.root.winfo_children():
+            child.update_idletasks()
+        
+    def create_hidden_qr_components(self, main_frame):
+        """创建但不显示二维码相关组件"""
+        # 创建二维码区域，但不添加到网格
+        self.qr_area_frame = ttk.Frame(main_frame)
+        
+        # 配置qr_area_frame内部布局
+        self.qr_area_frame.columnconfigure(0, weight=2)
+        self.qr_area_frame.columnconfigure(1, weight=8)
+        self.qr_area_frame.rowconfigure(0, weight=1)
+        
+        # 预览区域
+        self.preview_frame = ttk.LabelFrame(self.qr_area_frame, text=self.texts["qr_preview"], padding="5")
+        self.preview_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        self.preview_frame.config(height=50, width=50)
+        self.preview_frame.grid_propagate(False)
+        
+        # 创建一个固定大小的Label来显示图像
+        self.preview_label = tk.Label(self.preview_frame, bg='white')
+        self.preview_label.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # 初始化photo属性，避免图像被垃圾回收
+        self.photo = None
+        
+        # 二维码内容区域
+        self.result_frame = ttk.LabelFrame(self.qr_area_frame, text=self.texts["qr_content"], padding="10")
+        self.result_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        self.result_frame.grid_propagate(False)
+        
+        # 配置result_frame内部布局
+        self.result_frame.columnconfigure(0, weight=1)
+        self.result_frame.rowconfigure(0, weight=1)
+        self.result_frame.rowconfigure(1, weight=0)
+        
+        # 修改文本框高度为适当值，并添加滚动条
+        self.result_text = tk.Text(self.result_frame, height=3, wrap=tk.WORD)
+        self.result_text.grid(row=0, column=0, sticky="nsew")
+        
+        # 添加滚动条使内容过多时可滚动查看
+        result_scrollbar = ttk.Scrollbar(self.result_frame, orient=tk.VERTICAL, command=self.result_text.yview)
+        result_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.result_text.config(yscrollcommand=result_scrollbar.set)
+        
+        # 添加按钮框架，放在文本框下方
+        button_frame = ttk.Frame(self.result_frame)
+        button_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=5)
+        
+        self.send_button = ttk.Button(button_frame, text=self.texts["send_command"], 
+                                    command=self.send_qr_commands)
+        self.send_button.pack(pady=5, padx=5, ipadx=10, ipady=5)
+        self.send_button.config(state=tk.DISABLED)
+    
+    def change_language(self, event=None):
+        """Change the application language"""
+        lang = self.lang_var.get()
+        print(f"切换语言到: {lang}")
+        if lang in LANGUAGES and lang != self.current_language:
+            print(f"当前语言: {self.current_language} -> 新语言: {lang}")
+            self.current_language = lang
+            self.texts = LANGUAGES[lang]
+            self.update_ui_texts()
+    
+    def update_ui_texts(self):
+        """Update all UI texts to the current language"""
+        # Update window title
+        self.root.title(self.texts["title"])
+        
+        try:
+            # 重新创建整个菜单
+            self.menubar.delete(0, tk.END)
+            
+            # 重新创建操作菜单
         self.update_timer_id = None
     
     def start_waveform(self):
@@ -704,6 +1057,77 @@ class SerialQRCodeApp:
                             # 检查是否正在等待备份数据
                             if hasattr(self, 'backup_complete') and not self.backup_complete.is_set():
                                 print(f"收到响应数据: {response[:50]}...")  # 打印前50个字符用于调试
+        if self.is_connected and self.serial_port:
+            self.status_label.config(text=self.texts["status_connected"].format(self.serial_port.port))
+        else:
+            self.status_label.config(text=self.texts["status_not_connected"])
+        
+        # 更新框架标题
+        self.response_frame.config(text=self.texts["device_response"])
+           # Update frame titles
+        self.waveform_frame.config(text=self.texts["waveform"]) 
+        # 更新按钮文本
+        self.send_button.config(text=self.texts["send_command"])
+        self.clear_button.config(text=self.texts["clear"])
+        self.cmd_button.config(text=self.texts["send"])
+    
+    def audio_setup(self):
+        """设置音频参数和Matplotlib波形图"""
+        # 音频处理参数
+        # 音频处理参数
+        # CHUNK: 每次读取的音频帧大小，可选值如512, 1024, 2048, 4096等，值越大延迟越高但CPU占用更低
+        self.CHUNK = 1024
+        # FORMAT: 音频采样格式，可选值:
+        # - pyaudio.paFloat32: 32位浮点
+        # - pyaudio.paInt32: 32位整数
+        # - pyaudio.paInt24: 24位整数
+        # - pyaudio.paInt16: 16位整数(CD质量)
+        # - pyaudio.paInt8: 8位整数
+        # - pyaudio.paUInt8: 8位无符号整数
+        self.FORMAT = pyaudio.paInt16
+        # CHANNELS: 声道数，1=单声道，2=立体声
+        self.CHANNELS = 2
+        # RATE: 采样率(Hz)，常用值: 8000, 16000, 22050, 44100(CD质量), 48000, 96000
+        self.RATE = 44100
+        
+        # 创建Matplotlib图表 - 使用两个子图
+        self.fig = Figure(figsize=(5, 6), dpi=100)
+        
+        # 左声道子图
+        self.ax_left = self.fig.add_subplot(211)  # 2行1列的第1个图
+        self.ax_left.set_title(self.texts["left_channel"], loc='left')
+        self.ax_left.set_ylim(-10000, 10000)
+        self.ax_left.set_xlim(0, self.CHUNK)
+        self.ax_left.grid(True)
+        
+        # 右声道子图
+        self.ax_right = self.fig.add_subplot(212)  # 2行1列的第2个图
+        self.ax_right.set_title(self.texts["right_channel"], loc='left')
+        self.ax_right.set_ylim(-10000, 10000)
+        self.ax_right.set_xlim(0, self.CHUNK)
+        self.ax_right.grid(True)
+        
+        # 初始化线条
+        self.line_left = self.ax_left.plot([], [], 'g-')[0]
+        self.line_right = self.ax_right.plot([], [], 'r-')[0]
+        
+        # 调整子图间距
+        self.fig.tight_layout(pad=3.0)
+        
+        # 嵌入到Tkinter
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.waveform_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # PyAudio对象
+        self.p = pyaudio.PyAudio()
+        self.stream = None
+        self.waveform_active = False
+            operation_menu = tk.Menu(self.menubar, tearoff=0)
+            self.menubar.add_cascade(label=self.texts["operations_menu"], menu=operation_menu)
+            
+            operation_menu.add_command(
+                label=self.texts["select_image"],
                                 
                                 # 如果是备份数据（包含配置信息）
                                 if "ret:" in response and "OK" in response:
@@ -1082,6 +1506,10 @@ class SerialQRCodeApp:
         """Start screenshot function"""
         try:
             self.log_response(self.texts["screenshot_start"])
+                command=self.select_image,
+                accelerator="Ctrl+O"
+            )
+            operation_menu.add_command(
             
             # Minimize current window to view screen
             self.root.iconify()
@@ -1320,6 +1748,12 @@ class SerialQRCodeApp:
             if hasattr(self, 'restore_frame'):
                 self.restore_frame.grid_remove()
 
+    def show_about(self):
+        """显示关于对话框"""
+        messagebox.showinfo(
+            self.texts["about"],
+            self.texts["about_message"]
+        )
 if __name__ == "__main__":
     # 设置高DPI支持
     try:
