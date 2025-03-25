@@ -15,10 +15,7 @@ class ScreenshotSelector:
         """
         self.callback = callback
         self.instruction_text = instruction_text or "Click and drag to select area, ESC to cancel"
-        self.texts = texts or {
-            "select_area": "Click and drag to select area, ESC to cancel",
-            "screenshot_error": "Error during screenshot process: {}"
-        }
+    
         self.root = None
         self.canvas = None
         self.rect_id = None

@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, scrolledtext
 import serial
 import serial.tools.list_ports
 import cv2
@@ -18,6 +18,8 @@ matplotlib.use("TkAgg")  # 设置matplotlib后端为TkAgg
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.font_manager as fm
+import traceback
+from datetime import datetime
 
 # 程序依赖以下包:
 # pip install pyserial opencv-python pyzbar pillow numpy pyaudio matplotlib
@@ -59,7 +61,8 @@ LANGUAGES = {
         "screenshot_fail": "Failed to start screenshot: {}",
         "qr_not_detected": "No QR code detected in screenshot",
         "qr_detected": "Successfully detected QR code from screenshot",
-        "screenshot_error": "Error processing screenshot: {}",
+        "screenshot_instruction": "Click and drag to select area, release to capture, ESC to cancel",
+         "screenshot_error": "Error during screenshot process: {}",
         "waveform_started": "Waveform display started",
         "waveform_error": "Waveform startup error: {}",
         "waveform_update_error": "Waveform update error: {}",
@@ -71,7 +74,9 @@ LANGUAGES = {
         "close_audio_error": "Error closing audio stream: {}",
         "language": "Language",
         "error_title":"Error",
-        "qr_preview": "QR Preview"
+        "qr_preview": "QR Preview",
+        "operations_menu": "Operations",
+        "language_name": "English"
     },
     "zh": {
         "title": "Tradio 3D麦克风",
@@ -108,6 +113,7 @@ LANGUAGES = {
         "screenshot_fail": "启动截图功能失败: {}",
         "qr_not_detected": "未在截图中检测到二维码",
         "qr_detected": "成功从截图中检测到二维码",
+        "screenshot_instruction": "点击并拖动选择区域, 松开完成截图, ESC取消",
         "screenshot_error": "处理截图时出错: {}",
         "waveform_started": "波形图显示已启动",
         "waveform_error": "启动波形图错误: {}",
@@ -120,7 +126,9 @@ LANGUAGES = {
         "close_audio_error": "关闭音频流错误: {}",
         "language": "语言",
         "error_title":"错误",
-        "qr_preview": "二维码预览"
+        "qr_preview": "二维码预览",
+        "operations_menu": "操作",
+        "language_name": "中文"
     }
 }
 
@@ -148,7 +156,8 @@ except:
 class SerialQRCodeApp:
     def __init__(self, root):
         self.root = root
-        
+         #创建了一个线程锁，可以在需要串口访问的地方使用
+        self.serial_lock = threading.Lock()
         # Set default language
         self.current_language = "en"
         self.texts = LANGUAGES[self.current_language]
@@ -179,7 +188,7 @@ class SerialQRCodeApp:
         self.is_connected = False
         self.default_port = None  # 默认麦克风设备
         self.command_queue = queue.Queue()
-        self.response_buffer = "Welcome to Tradio 3D Mic"
+        self.response_buffer = "Recieveing..."
         
         # 创建界面
         self.create_ui()
@@ -204,153 +213,110 @@ class SerialQRCodeApp:
         
         # 自动连接麦克风设备
         self.root.after(1000, self.auto_connect_mic)
-        
-        # 预先填充文本部件以确保它获得正确的大小
-        self.response_text.config(state=tk.NORMAL)
-        self.response_text.insert(tk.END, "\n" * 8)  # 预填充8行
-        self.response_text.delete(1.0, tk.END)       # 然后清空
-        self.response_text.config(state=tk.DISABLED)
-        
+           
     def create_ui(self):
         # 主框架
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
+        # 创建菜单栏
+        self.menubar = tk.Menu(self.root)
+        self.root.config(menu=self.menubar)
+        
+        # 创建操作菜单
+        operation_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label=self.texts["operations_menu"], menu=operation_menu)
+        
+        # 添加菜单项
+        operation_menu.add_command(label=self.texts["select_image"], command=self.select_image)
+        operation_menu.add_command(label=self.texts["screenshot"], command=self.capture_screenshot)
+        operation_menu.add_command(label=self.texts["open_camera"], command=self.toggle_camera)
+        
+        # 创建语言菜单
+        language_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label=self.texts["language"], menu=language_menu)
+        
+        # 为每种语言添加单选按钮
+        self.lang_var = tk.StringVar(value=self.current_language)
+        for lang_code, lang_data in LANGUAGES.items():
+            language_menu.add_radiobutton(
+                label=lang_data["language_name"],
+                variable=self.lang_var,
+                value=lang_code,
+                command=self.change_language
+            )
+        
         # 配置主框架中的行列权重 - 调整权重使关键区域获得足够空间
         main_frame.columnconfigure(0, weight=1)  # 列可以扩展
         main_frame.rowconfigure(0, weight=0)  # 第一行 - 顶部操作栏（固定高度）
-        main_frame.rowconfigure(1, weight=4)  # 第二行 - 波形图（较大权重）
-        main_frame.rowconfigure(2, weight=2)  # 第三行 - 二维码相关区域（适当权重）
-        main_frame.rowconfigure(3, weight=2)  # 第四行 - 设备响应（适当权重）
-        main_frame.rowconfigure(4, weight=0)  # 第五行 - 命令输入（固定高度）
+        main_frame.rowconfigure(1, weight=5)  # 第二行 - 波形图（较大权重）
+        main_frame.rowconfigure(2, weight=5)  # 第三行 - 设备响应（较大权重，原本是二维码区域的位置）
+        main_frame.rowconfigure(3, weight=0)  # 第四行 - 命令输入（固定高度）
         
-        # 顶部操作栏 - 只包含状态标签和操作按钮
+        # 顶部操作栏 - 只保留状态标签和恢复按钮区域
         top_frame = ttk.Frame(main_frame, padding="5")
         top_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         
         # 配置top_frame内部布局
-        top_frame.columnconfigure(0, weight=0)  # 状态标签 - 固定宽度
-        top_frame.columnconfigure(1, weight=0)  # 摄像头按钮 - 固定宽度
-        top_frame.columnconfigure(2, weight=0)  # 选择图片按钮 - 固定宽度
-        top_frame.columnconfigure(3, weight=0)  # 屏幕截图按钮 - 固定宽度
-        top_frame.columnconfigure(4, weight=1)  # 空白填充区域 - 可扩展
-        top_frame.columnconfigure(5, weight=0)  # 语言选择 - 固定宽度
+        top_frame.columnconfigure(0, weight=1)  # 状态标签 - 可以扩展
+        top_frame.columnconfigure(1, weight=0)  # 恢复按钮 - 固定宽度
         
         # 状态标签
         self.status_label = ttk.Label(top_frame, text=self.texts["status_not_connected"])
         self.status_label.grid(row=0, column=0, sticky="w", padx=(0, 15))
         
-        # 二维码按钮
-        self.camera_button = ttk.Button(top_frame, text=self.texts["open_camera"], command=self.toggle_camera)
-        self.camera_button.grid(row=0, column=1, padx=5)
+        # 恢复按钮框架 (初始隐藏)
+        self.restore_frame = ttk.Frame(top_frame)
+        self.restore_frame.grid(row=0, column=1, sticky="e")
+        self.restore_frame.grid_remove()  # 初始隐藏
         
-        self.file_button = ttk.Button(top_frame, text=self.texts["select_image"], command=self.select_image)
-        self.file_button.grid(row=0, column=2, padx=5)
-        
-        self.screenshot_button = ttk.Button(top_frame, text=self.texts["screenshot"], command=self.capture_screenshot)
-        self.screenshot_button.grid(row=0, column=3, padx=5)
-        
-        # 语言选择器（最右侧）
-        lang_frame = ttk.Frame(top_frame)
-        lang_frame.grid(row=0, column=5, sticky="e")
-        
-        self.lang_label = ttk.Label(lang_frame, text=self.texts["language"]+":")
-        self.lang_label.pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.lang_var = tk.StringVar(value=self.current_language)
-        lang_combo = ttk.Combobox(lang_frame, textvariable=self.lang_var, 
-                                  values=list(LANGUAGES.keys()), width=5, state="readonly")
-        lang_combo.pack(side=tk.LEFT)
-        lang_combo.bind("<<ComboboxSelected>>", self.change_language)
+        self.restore_button = ttk.Button(
+            self.restore_frame, 
+            text="恢复原始配置", 
+            command=self.restore_original_config
+        )
+        self.restore_button.pack(side=tk.RIGHT, padx=5)
         
         # 波形图容器框架
-        
-        self.waveform_frame = ttk.LabelFrame(main_frame, text="", padding="10")
+        self.waveform_frame = ttk.LabelFrame(main_frame, text="", padding="1")
         self.waveform_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         # 设置最小高度
-        self.waveform_frame.config(height=300, width=400)
+        self.waveform_frame.config(height=400, width=400)
         self.waveform_frame.pack_propagate(False)  # 确保高度固定，不会被子组件影响
-        
-        # 防止自动调整大小
         self.waveform_frame.grid_propagate(False)
         
-        # 二维码区域 - 第三行，包含预览和内容两个部分
-        qr_area_frame = ttk.Frame(main_frame)
-        qr_area_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
-        
-        qr_area_frame.columnconfigure(0, weight=2)  # 预览区域占比3
-        qr_area_frame.columnconfigure(1, weight=8)  # 内容区域占比7
-        qr_area_frame.rowconfigure(0, weight=1)  # 确保行可以扩展
-        
-        # 预览区域
-        self.preview_frame = ttk.LabelFrame(qr_area_frame, text=self.texts["qr_preview"], padding="5")
-        self.preview_frame.grid_configure(sticky="w")  # 设置为靠左对齐
-        self.preview_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        self.preview_frame.config(height=50, width=50)
-        
-        # 防止自动调整大小
-        self.preview_frame.grid_propagate(False)
-        
-        # 创建一个固定大小的Label来显示图像
-        # 设置白色背景以便于区分图像边界
-        self.preview_label = tk.Label(self.preview_frame, bg='white')
-        self.preview_label.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # 初始化photo属性，避免图像被垃圾回收
-        self.photo = None
-        
-        # 二维码内容区域
-        self.result_frame = ttk.LabelFrame(qr_area_frame, text=self.texts["qr_content"], padding="10")
-        self.result_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        
-        # 配置result_frame内部布局
-        self.result_frame.columnconfigure(0, weight=1)
-        self.result_frame.rowconfigure(0, weight=1)
-        self.result_frame.rowconfigure(1, weight=0)
-        self.result_frame.grid_propagate(False)
-        # 修改文本框高度为适当值，并添加滚动条
-        self.result_text = tk.Text(self.result_frame, height=3, wrap=tk.WORD)
-        self.result_text.grid(row=0, column=0, sticky="nsew")
-        
-        # 添加滚动条使内容过多时可滚动查看
-        result_scrollbar = ttk.Scrollbar(self.result_frame, orient=tk.VERTICAL, command=self.result_text.yview)
-        result_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.result_text.config(yscrollcommand=result_scrollbar.set)
-        
-        # 添加按钮框架，放在文本框下方
-        button_frame = ttk.Frame(self.result_frame)
-        button_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=5)
-        
-        self.send_button = ttk.Button(button_frame, text=self.texts["send_command"], 
-                                    command=self.send_qr_commands)
-        self.send_button.pack(pady=5, padx=5, ipadx=10, ipady=5)
-        self.send_button.config(state=tk.DISABLED)  # Disable after placement
-        
-        # 响应显示区域 - 第四行
+        # 响应显示区域 - 直接放在第二行 (原第三行)
         self.response_frame = ttk.LabelFrame(main_frame, text=self.texts["device_response"], padding="10")
-        self.response_frame.grid(row=3, column=0, sticky="nsew", padx=5, pady=5)
+        self.response_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
         
         # 配置response_frame内部布局
         self.response_frame.columnconfigure(0, weight=1)
         self.response_frame.rowconfigure(0, weight=1)
         self.response_frame.rowconfigure(1, weight=0)
         self.response_frame.grid_propagate(False)
-        # 修改文本框高度为适当值
-        self.response_text = tk.Text(self.response_frame, height=8, wrap=tk.WORD)
+        
+        # 修改文本框高度为更大的值
+        self.response_text = tk.Text(self.response_frame, height=15, wrap=tk.WORD)
         self.response_text.grid(row=0, column=0, sticky="nsew")
         self.response_text.config(state=tk.DISABLED)
-        
-        # 滚动条
-        response_scrollbar = ttk.Scrollbar(self.response_text, orient=tk.VERTICAL, command=self.response_text.yview)
-        response_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.response_text.config(yscrollcommand=response_scrollbar.set)
+          # 创建响应文本框和滚动条
+        self.response_text = scrolledtext.ScrolledText(
+        self.response_frame, 
+        height=10,  # 增加高度以显示更多内容
+        wrap=tk.WORD
+         )
+        self.response_text.pack(fill='both', expand=True)
+        # # 滚动条
+        # response_scrollbar = ttk.Scrollbar(self.response_text, orient=tk.VERTICAL, command=self.response_text.yview)
+        # response_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # self.response_text.config(yscrollcommand=response_scrollbar.set)
         
         self.clear_button = ttk.Button(self.response_frame, text=self.texts["clear"], command=self.clear_response)
         self.clear_button.grid(row=1, column=0, pady=5)
         
-        # 手动命令输入 - 第五行
+        # 手动命令输入 - 移到第三行 (原第四行)
         cmd_frame = ttk.Frame(main_frame, padding="5")
-        cmd_frame.grid(row=4, column=0, sticky="ew", padx=5, pady=5)
+        cmd_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
         
         # 配置cmd_frame内部布局
         cmd_frame.columnconfigure(0, weight=1)
@@ -371,14 +337,70 @@ class SerialQRCodeApp:
         # 解析到的二维码命令
         self.qr_commands = []
         
+        # 创建二维码相关组件，但不显示它们
+        self.create_hidden_qr_components(main_frame)
+        
         # 最后一次性强制所有组件更新
         for child in self.root.winfo_children():
             child.update_idletasks()
         
+    def create_hidden_qr_components(self, main_frame):
+        """创建但不显示二维码相关组件"""
+        # 创建二维码区域，但不添加到网格
+        self.qr_area_frame = ttk.Frame(main_frame)
+        
+        # 配置qr_area_frame内部布局
+        self.qr_area_frame.columnconfigure(0, weight=2)
+        self.qr_area_frame.columnconfigure(1, weight=8)
+        self.qr_area_frame.rowconfigure(0, weight=1)
+        
+        # 预览区域
+        self.preview_frame = ttk.LabelFrame(self.qr_area_frame, text=self.texts["qr_preview"], padding="5")
+        self.preview_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        self.preview_frame.config(height=50, width=50)
+        self.preview_frame.grid_propagate(False)
+        
+        # 创建一个固定大小的Label来显示图像
+        self.preview_label = tk.Label(self.preview_frame, bg='white')
+        self.preview_label.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # 初始化photo属性，避免图像被垃圾回收
+        self.photo = None
+        
+        # 二维码内容区域
+        self.result_frame = ttk.LabelFrame(self.qr_area_frame, text=self.texts["qr_content"], padding="10")
+        self.result_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        self.result_frame.grid_propagate(False)
+        
+        # 配置result_frame内部布局
+        self.result_frame.columnconfigure(0, weight=1)
+        self.result_frame.rowconfigure(0, weight=1)
+        self.result_frame.rowconfigure(1, weight=0)
+        
+        # 修改文本框高度为适当值，并添加滚动条
+        self.result_text = tk.Text(self.result_frame, height=3, wrap=tk.WORD)
+        self.result_text.grid(row=0, column=0, sticky="nsew")
+        
+        # 添加滚动条使内容过多时可滚动查看
+        result_scrollbar = ttk.Scrollbar(self.result_frame, orient=tk.VERTICAL, command=self.result_text.yview)
+        result_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.result_text.config(yscrollcommand=result_scrollbar.set)
+        
+        # 添加按钮框架，放在文本框下方
+        button_frame = ttk.Frame(self.result_frame)
+        button_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=5)
+        
+        self.send_button = ttk.Button(button_frame, text=self.texts["send_command"], 
+                                    command=self.send_qr_commands)
+        self.send_button.pack(pady=5, padx=5, ipadx=10, ipady=5)
+        self.send_button.config(state=tk.DISABLED)
+    
     def change_language(self, event=None):
         """Change the application language"""
         lang = self.lang_var.get()
+        print(f"切换语言到: {lang}")
         if lang in LANGUAGES and lang != self.current_language:
+            print(f"当前语言: {self.current_language} -> 新语言: {lang}")
             self.current_language = lang
             self.texts = LANGUAGES[lang]
             self.update_ui_texts()
@@ -388,45 +410,54 @@ class SerialQRCodeApp:
         # Update window title
         self.root.title(self.texts["title"])
         
-        # Update status
+        try:
+            # 重新创建整个菜单
+            self.menubar.delete(0, tk.END)  # 清除现有菜单
+            
+            # 重新创建操作菜单
+            operation_menu = tk.Menu(self.menubar, tearoff=0)
+            self.menubar.add_cascade(label=self.texts["operations_menu"], menu=operation_menu)
+            
+            # 添加操作菜单项
+            operation_menu.add_command(label=self.texts["select_image"], command=self.select_image)
+            operation_menu.add_command(label=self.texts["screenshot"], command=self.capture_screenshot)
+            operation_menu.add_command(
+                label=self.texts["close_camera"] if self.camera_active else self.texts["open_camera"],
+                command=self.toggle_camera
+            )
+            
+            # 重新创建语言菜单
+            language_menu = tk.Menu(self.menubar, tearoff=0)
+            self.menubar.add_cascade(label=self.texts["language"], menu=language_menu)
+            
+            # 添加语言选项
+            for lang_code, lang_data in LANGUAGES.items():
+                language_menu.add_radiobutton(
+                    label=lang_data["language_name"],
+                    variable=self.lang_var,
+                    value=lang_code,
+                    command=self.change_language
+                )
+            
+        except Exception as e:
+            print(f"菜单更新错误: {str(e)}")
+        
+        # 更新其他UI元素...
+        # 状态标签
         if self.is_connected and self.serial_port:
             self.status_label.config(text=self.texts["status_connected"].format(self.serial_port.port))
         else:
             self.status_label.config(text=self.texts["status_not_connected"])
         
-        # Update frame titles
-        self.waveform_frame.config(text=self.texts["waveform"])
-        
-        # # Update QR frames
-        self.preview_frame.config(text=self.texts["qr_preview"])
-        self.result_frame.config(text=self.texts["qr_content"])
-        
-        # Update all LabelFrames
-        for child in self.root.winfo_children()[0].winfo_children():
-            if isinstance(child, ttk.LabelFrame):
-                if "preview" in child.cget("text").lower() or "二维码预览" in child.cget("text"):
-                    child.config(text=self.texts["qr_preview"])
-                elif "content" in child.cget("text").lower() or "内容" in child.cget("text"):
-                    child.config(text=self.texts["qr_content"])
-                elif "response" in child.cget("text").lower() or "响应" in child.cget("text"):
-                    child.config(text=self.texts["device_response"])
-        
-        # Update button texts
-        self.camera_button.config(text=self.texts["open_camera"] if not self.camera_active 
-                                  else self.texts["close_camera"])
-        self.file_button.config(text=self.texts["select_image"])
-        self.screenshot_button.config(text=self.texts["screenshot"])
+        # 更新框架标题
+        self.response_frame.config(text=self.texts["device_response"])
+           # Update frame titles
+        self.waveform_frame.config(text=self.texts["waveform"]) 
+        # 更新按钮文本
         self.send_button.config(text=self.texts["send_command"])
         self.clear_button.config(text=self.texts["clear"])
         self.cmd_button.config(text=self.texts["send"])
-        
-        # Update language selector label
-        for child in self.root.winfo_children()[0].winfo_children():
-            if isinstance(child, ttk.Frame):  # This is our language frame
-                for langchild in child.winfo_children():
-                    if isinstance(langchild, ttk.Label):
-                        langchild.config(text=self.texts["language"]+":")
-        
+    
     def audio_setup(self):
         """设置音频参数和Matplotlib波形图"""
         # 音频处理参数
@@ -558,22 +589,22 @@ class SerialQRCodeApp:
     
     def stop_waveform(self):
         """停止波形图显示"""
-            self.waveform_active = False
-            
+        self.waveform_active = False
+        
         # 取消定时器
         if self.update_timer_id:
             self.root.after_cancel(self.update_timer_id)
             self.update_timer_id = None
         
         # 关闭音频流
-            if self.stream:
+        if self.stream:
             try:
                 self.stream.stop_stream()
                 self.stream.close()
             except Exception as e:
                 self.log_response(f"{self.texts['close_audio_error']} {str(e)}")
-                self.stream = None
-            
+        self.stream = None
+    
         # 更新按钮文本
         
         self.log_response(self.texts["waveform_stopped"])
@@ -644,7 +675,7 @@ class SerialQRCodeApp:
             )
             
             # 设置DTR信号
-                self.serial_port.setDTR(True)
+            self.serial_port.setDTR(True)
             
             self.is_connected = True
             self.status_label.config(text=f"{self.texts['status_connected']} {port}")
@@ -668,7 +699,23 @@ class SerialQRCodeApp:
                         
                         # 检查是否有完整的行
                         if '\n' in self.response_buffer or '\r' in self.response_buffer:
-                            self.log_response(self.response_buffer.strip())
+                            response = self.response_buffer.strip()
+                            
+                            # 检查是否正在等待备份数据
+                            if hasattr(self, 'backup_complete') and not self.backup_complete.is_set():
+                                print(f"收到响应数据: {response[:50]}...")  # 打印前50个字符用于调试
+                                
+                                # 如果是备份数据（包含配置信息）
+                                if "ret:" in response and "OK" in response:
+                                    print("检测到完整的备份数据")
+                                    self.backup_data = response
+                                    self.backup_complete.set()
+                                else:
+                                    print("不是备份数据，继续等待...")
+                            else:
+                                # 常规响应处理
+                                self.log_response(response)
+                            
                             self.response_buffer = ""
                             
                 except Exception as e:
@@ -713,7 +760,7 @@ class SerialQRCodeApp:
                         self.log_response(f"{self.texts['sending_commands']} {command}", is_sent=True)
                         
                         # 等待一段时间，给设备处理时间
-                        time.sleep(0.5)
+                        time.sleep(0.05)
                         
                     except Exception as e:
                         self.log_response(f"{self.texts['send_fail']} {str(e)}")
@@ -728,21 +775,28 @@ class SerialQRCodeApp:
             # 短暂休眠
             time.sleep(0.01)
     
-    def log_response(self, message, is_sent=False):
-        """Log message in response area"""
-        def _update():
-            self.response_text.config(state=tk.NORMAL)
-            timestamp = time.strftime("%H:%M:%S")
+    def log_response(self, text, is_sent=False):
+        """记录响应到UI"""
+        try:
+            if not hasattr(self, 'response_text'):
+                print("警告: response_text 未创建")
+                return
             
-            if is_sent:
-                self.response_text.insert(tk.END, f"[{timestamp}] {message}\n", "sent")
-            else:
-                self.response_text.insert(tk.END, f"[{timestamp}] {message}\n", "received")
+            # 在UI线程中更新文本
+            timestamp = datetime.now().strftime("[%H:%M:%S] ")
+            message = f"{timestamp}{text}\n"
             
-            # self.response_text.see(tk.END)
-            # self.response_text.config(state=tk.DISABLED)
-        
-        self.root.after(0, _update)
+            self.root.after(0, lambda: self._update_response_text(message))
+        except Exception as e:
+            print(f"记录响应出错: {str(e)}")
+
+    def _update_response_text(self, message):
+        """在UI线程中安全地更新响应文本"""
+        try:
+            self.response_text.insert(tk.END, message)
+            self.response_text.see(tk.END)  # 滚动到最新内容
+        except Exception as e:
+            print(f"更新响应文本出错: {str(e)}")
     
     def clear_response(self):
         """清除响应区域"""
@@ -756,6 +810,13 @@ class SerialQRCodeApp:
             self.stop_camera()
         else:
             self.start_camera()
+        
+        # 更新菜单项文本
+        operation_menu = self.menubar.winfo_children()[0]  # 获取第一个子菜单
+        if self.camera_active:
+            operation_menu.entryconfig(2, label=self.texts["close_camera"])
+        else:
+            operation_menu.entryconfig(2, label=self.texts["open_camera"])
     
     def start_camera(self):
         """启动摄像头"""
@@ -766,7 +827,8 @@ class SerialQRCodeApp:
                 return
             
             self.camera_active = True
-            self.camera_button.config(text="关闭摄像头")
+            
+            # self.camera_button.config(text="关闭摄像头")
             self.update_camera_feed()
             
         except Exception as e:
@@ -775,7 +837,7 @@ class SerialQRCodeApp:
     def stop_camera(self):
         """停止摄像头"""
         self.camera_active = False
-        self.camera_button.config(text="打开摄像头")
+        # self.camera_button.config(text="打开摄像头")
         
         if self.cap:
             self.cap.release()
@@ -799,11 +861,17 @@ class SerialQRCodeApp:
                     
                     # 解析二维码内容
                     data = qr.data.decode('utf-8')
-                    self.process_qr_data(data)
+                    qr_valid = self.process_qr_data(data)
                     
-                    # 检测到二维码后停止摄像头
-                    self.stop_camera()
-                    return
+                    # 只有当二维码格式有效时才停止摄像头
+                    if qr_valid:
+                        # 显示最后一帧（带有二维码标记）
+                        cv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        pil_image = Image.fromarray(cv_image)
+                        self.display_image(pil_image)
+                        # 检测到有效二维码后停止摄像头
+                        self.stop_camera()
+                        return
                 
                 # 转换格式显示到UI
                 cv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -828,7 +896,7 @@ class SerialQRCodeApp:
                 # 读取图片
                 image = cv2.imread(file_path)
                 if image is None:
-                    messagebox.showerror("错误", "无法读取所选图片")
+                    messagebox.showerror(self.texts["error_title"], "无法读取所选图片")
                     return
                 
                 # 检测二维码
@@ -844,27 +912,31 @@ class SerialQRCodeApp:
                 
                 # 处理第一个二维码
                 data = qr_codes[0].data.decode('utf-8')
-                self.process_qr_data(data)
+                qr_valid = self.process_qr_data(data)
                 
-                # 在图片上标记二维码
-                for qr in qr_codes:
-                    points = qr.polygon
-                    if len(points) == 4:
-                        pts = [(p.x, p.y) for p in points]
-                        pts = np.array(pts, dtype=np.int32)
-                        cv2.polylines(image, [pts], True, (0, 255, 0), 2)
-                
-                # 显示图片
-                cv_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                pil_image = Image.fromarray(cv_image)
-                self.display_image(pil_image)
-                
+                # 只有在二维码格式有效时才标记并显示
+                if qr_valid:
+                    # 在图片上标记二维码
+                    for qr in qr_codes:
+                        points = qr.polygon
+                        if len(points) == 4:
+                            pts = [(p.x, p.y) for p in points]
+                            pts = np.array(pts, dtype=np.int32)
+                            cv2.polylines(image, [pts], True, (0, 255, 0), 2)
+                    
+                    # 显示图片
+                    cv_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(cv_image)
+                    self.display_image(pil_image)
+            
             except Exception as e:
                 messagebox.showerror("处理错误", str(e))
     
     def display_image(self, pil_image):
         """显示图片到预览区域"""
         # 调整图片大小以适应预览区域
+        return  
+         # 后续开发者模式下再显示图片和qr_content
         w, h = pil_image.size
         preview_w = self.preview_frame.winfo_width() or 400
         preview_h = self.preview_frame.winfo_height() or 400
@@ -894,25 +966,47 @@ class SerialQRCodeApp:
         """处理二维码数据"""
         if data:
             self.log_response(f"QR content length: {len(data)}, line count: {data.count('\n')+1}")
-            # Log first 50 chars to check encoding
-            self.log_response(f"Content start: {data[:50]}")
-            # 清空现有内容
+            
+            # 验证二维码格式是否正确
+            # if not data.startswith("[3DMIC_PARAMETER]"):
+            #     messagebox.showerror(self.texts["error_title"], "错误的二维码格式，二维码内容必须以[3DMIC_PARAMETER]开头")
+            #     return False
+            
+            # 清空现有内容并保存二维码内容
             self.result_text.delete(1.0, tk.END)
-            
-            # 确保完整插入所有内容
             self.result_text.insert(tk.END, data)
-            
-            # 滚动到顶部
-            self.result_text.see("1.0")
             
             # 将二维码内容按行分割
             commands = [cmd.strip() for cmd in data.split('\n') if cmd.strip()]
             self.qr_commands = commands
+            print("got qr_commands:",self.qr_commands)
             
-            # 更新按钮状态
-            self.update_send_button_state()
+            # 备份当前配置并自动发送新配置
+            if self.is_connected:
+                if self.backup_mic_config():
+                    # 添加恢复按钮到界面
+                    self.show_restore_button()
+                    
+                    # 自动发送配置
+                    self.log_response("检测到有效的麦克风配置，正在自动应用...")
+                    self.send_qr_commands(auto_send=True)
+                    
+                    # 隐藏二维码相关区域，只显示响应区域
+                    self.hide_qr_area()
+                    
+                    # # 扩大response区域
+                    # self.expand_response_area()
+                else:
+                    messagebox.showwarning("警告", "无法备份当前配置，请手动点击发送按钮应用新配置")
+                    # 保持原有界面布局
+                    self.update_send_button_state()
+            else:
+                messagebox.showwarning("警告", "设备未连接，无法应用配置")
+                self.update_send_button_state()
             
-            self.log_response(self.texts['parsed_qr'] + str(len(commands)))
+            return True
+        
+        return False
     
     def update_send_button_state(self):
         """更新发送按钮状态"""
@@ -921,63 +1015,67 @@ class SerialQRCodeApp:
         else:
             self.send_button.config(state=tk.DISABLED)
     
-    def send_qr_commands(self):
+    def send_qr_commands(self, auto_send=False):
         """发送二维码解析出的指令"""
         if not self.is_connected:
             messagebox.showerror(self.texts["error_title"], self.texts["device_not_connected"])
             return
         
         if not self.qr_commands:
-            messagebox.showinfo(self.texts["提示"], self.texts["no_commands"])
+            messagebox.showinfo("提示", self.texts["no_commands"])
             return
         
-        # 显示发送进度对话框
-        progress_window = tk.Toplevel(self.root)
-        progress_window.title("发送进度")
-        progress_window.geometry("300x150")
-        progress_window.transient(self.root)
-        progress_window.grab_set()
+        # 自动发送模式下不显示进度窗口
+        if not auto_send:
+            # 显示发送进度对话框
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("发送进度")
+            progress_window.geometry("300x150")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            ttk.Label(progress_window, text=self.texts["sending_commands"]).pack(pady=10)
+            
+            progress_var = tk.DoubleVar()
+            progress_bar = ttk.Progressbar(progress_window, variable=progress_var, maximum=len(self.qr_commands))
+            progress_bar.pack(fill=tk.X, padx=20, pady=10)
+            
+            status_label = ttk.Label(progress_window, text="0/" + str(len(self.qr_commands)))
+            status_label.pack(pady=5)
+            
+            cancel_button = ttk.Button(progress_window, text="取消", command=lambda: progress_window.destroy())
+            cancel_button.pack(pady=10)
+            
+            # 禁用发送按钮
+            self.send_button.config(state=tk.DISABLED)
         
-        ttk.Label(progress_window, text=self.texts["sending_commands"]).pack(pady=10)
-        
-        progress_var = tk.DoubleVar()
-        progress_bar = ttk.Progressbar(progress_window, variable=progress_var, maximum=len(self.qr_commands))
-        progress_bar.pack(fill=tk.X, padx=20, pady=10)
-        
-        status_label = ttk.Label(progress_window, text="0/" + str(len(self.qr_commands)))
-        status_label.pack(pady=5)
-        
-        cancel_button = ttk.Button(progress_window, text="取消", command=lambda: progress_window.destroy())
-        cancel_button.pack(pady=10)
-        
-        # 禁用发送按钮
-        self.send_button.config(state=tk.DISABLED)
-        
-        # 启动发送线程
+        # 发送命令函数
         def send_thread():
             total = len(self.qr_commands)
             for i, cmd in enumerate(self.qr_commands):
-                if not progress_window.winfo_exists() or not self.is_connected:
+                if (not auto_send and not progress_window.winfo_exists()) or not self.is_connected:
                     break
                 
                 # 更新进度
-                progress_var.set(i+1)
-                progress_window.after(0, lambda idx=i+1, tot=total: status_label.config(text=f"{idx}/{tot}"))
+                if not auto_send:
+                    progress_var.set(i+1)
+                    progress_window.after(0, lambda idx=i+1, tot=total: status_label.config(text=f"{idx}/{tot}"))
                 
                 # 发送命令
                 self.send_command(cmd)
                 
                 # 等待发送和响应完成
-                time.sleep(1)
+                time.sleep(0.5)
             
             # 发送完成
-            if progress_window.winfo_exists():
+            if not auto_send and progress_window.winfo_exists():
                 progress_window.after(0, lambda: status_label.config(text=self.texts["sending_complete"]))
                 progress_window.after(1000, progress_window.destroy)
             
-            # 重新启用发送按钮
-            self.root.after(0, lambda: self.send_button.config(state=tk.NORMAL))
+                # 重新启用发送按钮
+                self.root.after(0, lambda: self.send_button.config(state=tk.NORMAL))
         
+        # 启动发送线程
         threading.Thread(target=send_thread, daemon=True).start()
     
     def capture_screenshot(self):
@@ -991,12 +1089,7 @@ class SerialQRCodeApp:
             # Give user time to prepare
             time.sleep(0.5)
             
-            # Start screenshot with current language texts
-            screenshot_texts = {
-                "select_area": self.texts["select_area"],
-                "screenshot_error": self.texts["screenshot_error"]
-            }
-            start_screenshot(self.process_screenshot, texts=screenshot_texts)
+            self.root.after(100, lambda: start_screenshot(self.process_screenshot, instruction_text=self.texts["screenshot_instruction"]))
         except Exception as e:
             self.log_response(self.texts["screenshot_fail"].format(str(e)))
             # Ensure window is restored
@@ -1009,7 +1102,7 @@ class SerialQRCodeApp:
         
         # 检查图像是否有效
         if image is None:
-            self.log_response(self.texts["screenshot_error"].format("截图失败或被取消"), "error")
+            self.log_response(self.texts["screenshot_error"].format("截图失败或被取消"))
             return
         
         try:
@@ -1024,30 +1117,32 @@ class SerialQRCodeApp:
             qr_codes = decode(cv_image)
             
             if not qr_codes:
-                self.log_response(self.texts["qr_not_detected"], "error")
+                self.log_response(self.texts["qr_not_detected"])
                 return
             
             # 处理第一个二维码
             data = qr_codes[0].data.decode('utf-8')
-            self.process_qr_data(data)
+            qr_valid = self.process_qr_data(data)
             
-            # 在图像上标记二维码
-            img_with_qr = cv_image.copy()
-            for qr in qr_codes:
-                # 获取二维码边界点
-                points = qr.polygon
-                if len(points) == 4:
-                    pts = [(p.x, p.y) for p in points]
-                    pts = np.array(pts, dtype=np.int32)
-                    cv2.polylines(img_with_qr, [pts], True, (0, 255, 0), 2)
+            # 只有在二维码格式有效时才标记并显示
+            if qr_valid:
+                # 在图像上标记二维码
+                img_with_qr = cv_image.copy()
+                for qr in qr_codes:
+                    # 获取二维码边界点
+                    points = qr.polygon
+                    if len(points) == 4:
+                        pts = [(p.x, p.y) for p in points]
+                        pts = np.array(pts, dtype=np.int32)
+                        cv2.polylines(img_with_qr, [pts], True, (0, 255, 0), 2)
             
-            # 转换回PIL格式并显示带标记的图像
-            marked_image = Image.fromarray(cv2.cvtColor(img_with_qr, cv2.COLOR_BGR2RGB))
-            self.display_image(marked_image)
+                # 转换回PIL格式并显示带标记的图像
+                marked_image = Image.fromarray(cv2.cvtColor(img_with_qr, cv2.COLOR_BGR2RGB))
+                self.display_image(marked_image)
             
-            self.log_response(self.texts["qr_detected"], "success")
+                self.log_response(self.texts["qr_detected"])
         except Exception as e:
-            self.log_response(self.texts["screenshot_error"].format(str(e)), "error")
+            self.log_response(self.texts["screenshot_error"].format(str(e)))
     
     def on_closing(self):
         """关闭应用程序"""
@@ -1124,6 +1219,106 @@ class SerialQRCodeApp:
             # 如果出错，短暂暂停后重试
             if self.waveform_active:
                 self.update_timer_id = self.root.after(100, self.update_waveform_tk)
+
+    def backup_mic_config(self):
+        """备份麦克风当前配置"""
+        try:
+            # 创建事件来等待响应完成
+            self.backup_complete = threading.Event()
+            self.backup_data = None
+            
+            print("开始备份配置...")
+            
+            # 使用现有的命令队列发送命令
+            self.send_command("readallcfg")
+            
+            # 等待响应
+            print("等待备份响应...")
+            if not self.backup_complete.wait(10.0):
+                print("警告: 备份操作超时")
+                return False
+            # 保存备份数据到backup_config
+            if self.backup_data:
+                self.backup_config = self.backup_data
+                print(f"成功保存备份配置，长度: {len(self.backup_config)}")
+            else:
+                print("警告: 未能获取有效的备份数据")
+                return False
+            print(f"备份完成，数据长度: {len(self.backup_data) if self.backup_data else 0}")
+            
+        
+            return True
+        
+        except Exception as e:
+            print(f"备份配置出错: {str(e)}")
+            # 确保恢复原始处理函数
+            return False
+        finally:
+            # 清理事件对象
+            if hasattr(self, 'backup_complete'):
+                delattr(self, 'backup_complete')
+    def hide_qr_area(self):
+        """隐藏二维码区域"""
+        if hasattr(self, 'qr_area_frame'):
+            self.qr_area_frame.grid_remove()  # 不是destroy，而是从布局中移除，保留实例
+
+    def expand_response_area(self):
+        """扩大响应区域"""
+        # 修改行权重，让响应区域占用原本二维码区域的空间
+        main_frame = self.root.winfo_children()[0]  # 获取主框架
+        main_frame.rowconfigure(2, weight=0)  # 二维码区域权重设为0
+        main_frame.rowconfigure(3, weight=3)  # 增加响应区域的权重
+
+    def show_restore_button(self):
+        """显示恢复配置按钮"""
+        # 创建一个框架来容纳恢复按钮
+        if not hasattr(self, 'restore_frame'):
+            main_frame = self.root.winfo_children()[0]
+            self.restore_frame = ttk.Frame(main_frame, padding="5")
+            self.restore_frame.grid(row=0, column=0, sticky="e", padx=5, pady=5)
+            
+            self.restore_button = ttk.Button(
+                self.restore_frame, 
+                text="恢复原始配置", 
+                command=self.restore_original_config
+            )
+            self.restore_button.pack(side=tk.RIGHT, padx=5)
+        else:
+            # 如果已存在，只需要显示它
+            self.restore_frame.grid()
+
+    def restore_original_config(self):
+        """恢复麦克风原始配置"""
+        if not hasattr(self, 'backup_config') or not self.backup_config:
+            messagebox.showwarning("警告", "没有可用的备份配置")
+            return
+        
+        if not self.is_connected:
+            messagebox.showerror(self.texts["error_title"], "设备未连接，无法恢复配置")
+            return
+        
+        # 询问用户是否确定要恢复
+        if messagebox.askyesno("确认", "确定要恢复麦克风原始配置吗？"):
+            self.log_response("正在恢复麦克风原始配置...")
+            
+            # 发送备份的配置命令
+ 
+            # 从备份数据中提取ret:后面的内容作为命令
+            if "ret:" in self.backup_config:
+                command = self.backup_config.split("ret:", 1)[1].strip()
+                self.send_command(command)
+                print(f"发送命令: {command}")
+            else:
+                self.send_command("readallcfg")
+                print(f"发送命令: readallcfg")
+
+            time.sleep(0.1)  # 短暂延迟确保命令被处理
+            
+            self.log_response("麦克风原始配置已恢复")
+            
+            # 可选：隐藏恢复按钮
+            if hasattr(self, 'restore_frame'):
+                self.restore_frame.grid_remove()
 
 if __name__ == "__main__":
     # 设置高DPI支持
