@@ -3,5 +3,8 @@
 
 # Python bytecode
 __pycache__/
+.myenv/
 *.py[cod]
 *\.class
+
+*.code-workspace

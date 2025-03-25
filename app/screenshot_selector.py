@@ -2,16 +2,23 @@ import tkinter as tk
 from PIL import Image, ImageTk
 import pyautogui
 import threading
+import time
 
 class ScreenshotSelector:
-    def __init__(self, callback):
+    def __init__(self, callback, instruction_text=None):
         """
         初始化截图选择器
         
         Args:
             callback: 截图完成后的回调函数，将接收截图图像作为参数
+            instruction_text: Text to show as instruction (supports different languages)
         """
         self.callback = callback
+        self.instruction_text = instruction_text or "Click and drag to select area, ESC to cancel"
+        self.texts = texts or {
+            "select_area": "Click and drag to select area, ESC to cancel",
+            "screenshot_error": "Error during screenshot process: {}"
+        }
         self.root = None
         self.canvas = None
         self.rect_id = None
@@ -59,7 +66,7 @@ class ScreenshotSelector:
             self.canvas.create_text(
                 screenshot_width // 2, 
                 30, 
-                text="按住鼠标左键并拖动选择区域，松开完成截图，ESC键取消", 
+                text=self.instruction_text, 
                 fill="white", 
                 font=("Arial", 16)
             )
@@ -130,17 +137,51 @@ class ScreenshotSelector:
                 self.canvas.delete(self.rect_id)
                 self.rect_id = None
 
-def start_screenshot(callback):
+def start_screenshot(callback, instruction_text=None):
     """
     启动截图功能的便捷方法
     
     Args:
         callback: 截图完成后的回调函数
+        instruction_text: Text to show as instruction (supports different languages)
     """
     try:
-        selector = ScreenshotSelector(callback)
+        selector = ScreenshotSelector(callback, instruction_text)
         thread = threading.Thread(target=selector.take_screenshot, daemon=True)
         thread.start()
     except Exception as e:
         print(f"启动截图线程时出错: {str(e)}")
         callback(None)
+
+def capture_screenshot(self):
+    """Start screenshot function"""
+    try:
+        self.log_response(self.texts["screenshot_start"])
+        
+        # Minimize current window to view screen
+        self.root.iconify()
+        
+        # Give user time to prepare
+        time.sleep(0.5)
+        
+        # Start screenshot with current language instruction text
+        start_screenshot(self.process_screenshot, self.texts["screenshot_instruction"])
+    except Exception as e:
+        self.log_response(self.texts["screenshot_fail"].format(str(e)))
+        # Ensure window is restored
+        self.root.deiconify()
+
+LANGUAGES = {
+    "en": {
+        # ... existing entries ...
+        "screenshot_instruction": "Click and drag to select area, release to capture, ESC to cancel",
+        "screenshot_start": "Starting screenshot function...",
+        "screenshot_fail": "Failed to start screenshot function: {}",
+    },
+    "zh": {
+        # ... existing entries ...
+        "screenshot_instruction": "按住鼠标左键并拖动选择区域，松开完成截图，ESC键取消",
+        "screenshot_start": "正在启动截图功能...",
+        "screenshot_fail": "启动截图功能失败: {}",
+    }
+}
